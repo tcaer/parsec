@@ -15,10 +15,6 @@ static const char SHADERS[] = {
 
 // MARK primitive decls
 
-typedef struct Color {
-  float r, g, b, a;
-} Color;
-
 typedef struct Globals {
   Vec2 viewport_size;
 } Globals;
@@ -41,6 +37,7 @@ typedef struct Renderer {
 // MARK WindowState decls
 
 typedef struct WindowState {
+  Vec2 mouse;
   Renderer renderer;
 } WindowState;
 
@@ -70,8 +67,8 @@ void Renderer_paint_sprites(Renderer *self,
                             size_t num_sprites);
 
 void Renderer_encode_commands(MTKView *view, Clay_RenderCommandArray commands,
-                              Quad (*quads)[], size_t *num_quads,
-                              Sprite (*sprites)[], size_t *num_sprites);
+                              Quad *quads, size_t *num_quads, Sprite *sprites,
+                              size_t *num_sprites);
 
 id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
                                              id<MTLLibrary> library,
@@ -140,9 +137,8 @@ void Renderer_paint(Renderer *self, MTKView *view,
     Sprite sprites[4000];
     size_t num_quads = 0;
     size_t num_sprites = 0;
-    Renderer_encode_commands(view, commands, &quads, &num_quads, &sprites,
+    Renderer_encode_commands(view, commands, quads, &num_quads, sprites,
                              &num_sprites);
-    // TextSystem_layout("foo, bar", 8, (Vec2){20, 120}, sprites);
     TextSystem_update_atlas(self->font_atlas);
 
     size_t instance_offset = 0;
@@ -168,7 +164,7 @@ void Renderer_paint_quads(Renderer *self,
 
   size_t bytes_len = sizeof(Quad) * num_quads;
   // TODO we should double the buffer size and try again on the next draw call
-  assert(bytes_len + *offset < INSTANCE_BUFFER_SIZE);
+  assert(bytes_len + *offset <= INSTANCE_BUFFER_SIZE);
 
   char *contents = [self->instance_buffer contents];
   memcpy(contents + *offset, quads, bytes_len);
@@ -194,9 +190,9 @@ void Renderer_paint_sprites(Renderer *self,
   if (num_sprites == 0)
     return;
 
-  size_t bytes_len = sizeof(Quad) * num_sprites;
+  size_t bytes_len = sizeof(Sprite) * num_sprites;
   // TODO we should double the buffer size and try again on the next draw call
-  assert(bytes_len + *offset < INSTANCE_BUFFER_SIZE);
+  assert(bytes_len + *offset <= INSTANCE_BUFFER_SIZE);
 
   char *contents = [self->instance_buffer contents];
   memcpy(contents + *offset, sprites, bytes_len);
@@ -217,8 +213,8 @@ void Renderer_paint_sprites(Renderer *self,
 }
 
 void Renderer_encode_commands(MTKView *view, Clay_RenderCommandArray commands,
-                              Quad (*quads)[], size_t *num_quads,
-                              Sprite (*sprites)[], size_t *num_sprites) {
+                              Quad *quads, size_t *num_quads, Sprite *sprites,
+                              size_t *num_sprites) {
   // TODO this system is not correct if there are multiple layers to render.
   // Clay returns commands sorted from back to front and shufflign this order to
   // fit into instances loses this information
@@ -233,7 +229,7 @@ void Renderer_encode_commands(MTKView *view, Clay_RenderCommandArray commands,
     case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
       Clay_RectangleElementConfig *config =
           command->config.rectangleElementConfig;
-      (*quads)[*num_quads] = (Quad){
+      quads[*num_quads] = (Quad){
           {bounding_box.x, bounding_box.y},
           {bounding_box.width, bounding_box.height},
           {config->color.r / 255, config->color.g / 255, config->color.b / 255,
@@ -245,10 +241,9 @@ void Renderer_encode_commands(MTKView *view, Clay_RenderCommandArray commands,
     // TODO this switch does not account for any config like font size
     case CLAY_RENDER_COMMAND_TYPE_TEXT: {
       Clay_TextElementConfig *config = command->config.textElementConfig;
-      Sprite *offset = (*sprites) + *num_sprites;
       TextSystem_layout(command->text.chars, command->text.length,
-                        (Vec2){bounding_box.x, bounding_box.y}, config, offset);
-      *num_sprites += command->text.length;
+                        (Vec2){bounding_box.x, bounding_box.y}, config, sprites,
+                        num_sprites);
       break;
     }
     }
@@ -291,19 +286,36 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
 @end
 
 @implementation ParsecView
+- (void)setState:(WindowState *)new_state {
+  state = new_state;
+}
+
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
 }
 
 - (void)drawInMTKView:(MTKView *)view {
   CGSize viewport_size = [view drawableSize];
-  UI_set_state((Vec2){viewport_size.width, viewport_size.height});
+
+  UI_set_state((Vec2){viewport_size.width, viewport_size.height}, state->mouse);
+
   Clay_RenderCommandArray commands = UI_render_editor();
 
   Renderer_paint(&state->renderer, view, commands);
 }
 
-- (void)setState:(WindowState *)new_state {
-  state = new_state;
+- (void)mouseMoved:(NSEvent *)event {
+  CGSize viewport_size = [self drawableSize];
+  float scale = [[self layer] contentsScale];
+
+  NSPoint location = [event locationInWindow];
+  float new_x = location.x * scale;
+  float new_y = viewport_size.height - (location.y * scale);
+
+  state->mouse = (Vec2){new_x, new_y};
+}
+
+- (void)mouseExited:(NSEvent *)event {
+  state->mouse = (Vec2){-10, -10};
 }
 @end
 
@@ -361,10 +373,19 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
   ParsecView *view = [[ParsecView alloc] initWithFrame:rect];
   [view setDevice:device];
   [view setDelegate:view];
+  NSTrackingArea *t_area = [[NSTrackingArea alloc]
+      initWithRect:rect
+           options:NSTrackingMouseMoved | NSTrackingActiveInKeyWindow |
+                   NSTrackingInVisibleRect | NSTrackingMouseEnteredAndExited
+             owner:view
+          userInfo:nil];
+  [view addTrackingArea:t_area];
 
   [win setContentView:view];
+  [win setInitialFirstResponder:view];
 
-  WindowState *state = malloc(sizeof(WindowState));
+  WindowState *state = calloc(1, sizeof(WindowState));
+  state->mouse = (Vec2){-10, -10};
   Renderer_init(&state->renderer, device);
 
   [win setState:state];

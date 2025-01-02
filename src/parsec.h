@@ -20,9 +20,14 @@ typedef struct Vec2 {
   float x, y;
 } Vec2;
 
+typedef struct Color {
+  float r, g, b, a;
+} Color;
+
 typedef struct Sprite {
   Vec2 origin, size;
   Vec2 uv_origin, uv_size;
+  Color color;
 } Sprite;
 
 // MARK TextSystem
@@ -35,7 +40,7 @@ void TextSystem_init();
 
 void TextSystem_destroy();
 
-void TextSystem_layout(const char* text, size_t len, Vec2 origin, Clay_TextElementConfig *config, Sprite *sprites);
+void TextSystem_layout(const char* text, size_t len, Vec2 origin, Clay_TextElementConfig *config, Sprite *sprites, size_t *num_sprites);
 
 bool TextSystem_is_dirty();
 
@@ -43,6 +48,6 @@ bool TextSystem_is_dirty();
 
 void UI_init();
 
-void UI_set_state(Vec2 viewport_size);
+void UI_set_state(Vec2 viewport_size, Vec2 mouse_pos);
 
 Clay_RenderCommandArray UI_render_editor();

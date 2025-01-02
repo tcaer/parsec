@@ -57,11 +57,13 @@ fragment float4 quad_fragment(QuadVertex in [[stage_in]]) {
 struct Sprite {
 	float2 origin, size;
 	float2 uv_origin, uv_size;
+	float4 color;
 };
 
 struct SpriteVertex {
 	float4 position [[position]];
 	float2 uv;
+	float4 color;
 };
 
 vertex SpriteVertex sprite_vertex(
@@ -78,7 +80,8 @@ vertex SpriteVertex sprite_vertex(
 
 	return SpriteVertex{
 		to_device_pos(pos, globals.viewport_size),
-		uv
+		uv,
+		sprite.color
 	};
 }
 
@@ -88,5 +91,8 @@ fragment float4 sprite_fragment(
 	SpriteVertex in [[stage_in]],
 	texture2d<float> atlas [[texture(0)]]
 ) {
-	return atlas.sample(sprite_sampler, in.uv);
+	float4 sample = atlas.sample(sprite_sampler, in.uv);
+	float4 color = in.color;
+	color.a *= sample.a;
+	return color;
 }
