@@ -1,21 +1,19 @@
+#include "fontstash/fontstash.h"
+#include "parsec.h"
+
 #include <AppKit/AppKit.h>
 #include <Metal/Metal.h>
 #include <MetalKit/MetalKit.h>
-#include <assert.h>
 
 // MARK defines
 
 #define NS_NEW(X) [[X alloc] init]
 
-const char SHADERS[] = {
+static const char SHADERS[] = {
 #embed "../build/shaders/shaders.metallib"
 };
 
 // MARK primitive decls
-
-typedef struct Vec2 {
-  float x, y;
-} Vec2;
 
 typedef struct Color {
   float r, g, b, a;
@@ -33,7 +31,9 @@ typedef struct Quad {
 // MARK Renderer decls
 
 typedef struct Renderer {
+  id<MTLTexture> font_atlas;
   id<MTLBuffer> instance_buffer;
+  id<MTLRenderPipelineState> sprite_pipeline_state;
   id<MTLRenderPipelineState> quad_pipeline_state;
   id<MTLCommandQueue> queue;
 } Renderer;
@@ -43,6 +43,18 @@ typedef struct Renderer {
 typedef struct WindowState {
   Renderer renderer;
 } WindowState;
+
+// MARK TextSystem impls
+
+void TextSystem_update_atlas(id<MTLTexture> atlas) {
+  if (!TextSystem_is_dirty())
+    return;
+
+  int width, height;
+  const unsigned char *data = fonsGetTextureData(f_ctx, &width, &height);
+  MTLRegion region = {{0, 0, 0}, {width, height, 1}};
+  [atlas replaceRegion:region mipmapLevel:0 withBytes:data bytesPerRow:width];
+}
 
 // MARK Renderer impls
 
@@ -56,10 +68,23 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
 
 void Renderer_paint_quads(Renderer *self,
                           id<MTLRenderCommandEncoder> command_encoder,
-                          Quad *quads, size_t num_quads);
+                          size_t *offset, Quad *quads, size_t num_quads);
+void Renderer_paint_sprites(Renderer *self,
+                            id<MTLRenderCommandEncoder> command_encoder,
+                            size_t *offset, Sprite *sprites,
+                            size_t num_sprites);
 
 void Renderer_init(Renderer *self, id<MTLDevice> device) {
   @autoreleasepool {
+    int width, height;
+    fonsGetTextureData(f_ctx, &width, &height);
+    MTLTextureDescriptor *desc = NS_NEW(MTLTextureDescriptor);
+    [desc setWidth:width];
+    [desc setHeight:height];
+    [desc setPixelFormat:MTLPixelFormatA8Unorm];
+
+    self->font_atlas = [device newTextureWithDescriptor:desc];
+
     self->instance_buffer =
         [device newBufferWithLength:INSTANCE_BUFFER_SIZE
                             options:MTLResourceStorageModeManaged];
@@ -72,6 +97,9 @@ void Renderer_init(Renderer *self, id<MTLDevice> device) {
     id<MTLLibrary> library = [device newLibraryWithData:data error:&err];
     assert(err == nil);
 
+    self->sprite_pipeline_state = mk_pipeline_state(
+        device, library, @"sprite_vertex", @"sprite_fragment", &err);
+    assert(err == nil);
     self->quad_pipeline_state = mk_pipeline_state(
         device, library, @"quad_vertex", @"quad_fragment", &err);
     assert(err == nil);
@@ -81,8 +109,10 @@ void Renderer_init(Renderer *self, id<MTLDevice> device) {
 }
 
 void Renderer_destroy(Renderer *self) {
+  self->font_atlas = nil;
   self->instance_buffer = nil;
   self->quad_pipeline_state = nil;
+  self->sprite_pipeline_state = nil;
   self->queue = nil;
 }
 
@@ -98,10 +128,19 @@ void Renderer_paint(Renderer *self, MTKView *view) {
     Globals globals = (Globals){{drawable_size.width, drawable_size.height}};
     [command_encoder setVertexBytes:&globals length:sizeof(Globals) atIndex:0];
 
-    Quad test_quads[] = {(Quad){{410, 410}, {400, 400}, {0, 1, 0, 1}},
-                         (Quad){{10, 10}, {400, 400}, {1, 0, 0, 1}}};
+    Quad quads[] = {(Quad){{410, 410}, {400, 400}, {0, 1, 0, 1}},
+                    (Quad){{10, 10}, {400, 400}, {1, 0, 0, 1}}};
+    Sprite *sprites;
+    TextSystem_layout("foo, bar", 8, (Vec2){20, 120}, &sprites);
+    TextSystem_update_atlas(self->font_atlas);
 
-    Renderer_paint_quads(self, command_encoder, test_quads, 2);
+    size_t instance_offset = 0;
+    Renderer_paint_quads(self, command_encoder, &instance_offset, quads, 2);
+    if (sprites != NULL) {
+      Renderer_paint_sprites(self, command_encoder, &instance_offset, sprites,
+                             8);
+      free(sprites);
+    }
 
     [command_encoder endEncoding];
 
@@ -114,21 +153,52 @@ void Renderer_paint(Renderer *self, MTKView *view) {
 
 void Renderer_paint_quads(Renderer *self,
                           id<MTLRenderCommandEncoder> command_encoder,
-                          Quad *quads, size_t num_quads) {
+                          size_t *offset, Quad *quads, size_t num_quads) {
   size_t bytes_len = sizeof(Quad) * num_quads;
   // TODO we should double the buffer size and try again on the next draw call
-  assert(bytes_len < INSTANCE_BUFFER_SIZE);
+  assert(bytes_len + *offset < INSTANCE_BUFFER_SIZE);
 
-  Quad *contents = [self->instance_buffer contents];
-  memcpy(contents, quads, bytes_len);
-  [self->instance_buffer didModifyRange:(NSRange){0, bytes_len}];
+  char *contents = [self->instance_buffer contents];
+  memcpy(contents + *offset, quads, bytes_len);
+  [self->instance_buffer
+      didModifyRange:(NSRange){(NSUInteger)offset, bytes_len}];
 
   [command_encoder setRenderPipelineState:self->quad_pipeline_state];
-  [command_encoder setVertexBuffer:self->instance_buffer offset:0 atIndex:1];
+  [command_encoder setVertexBuffer:self->instance_buffer
+                            offset:*offset
+                           atIndex:1];
   [command_encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
                       vertexStart:0
                       vertexCount:4
                     instanceCount:num_quads];
+
+  *offset += bytes_len;
+}
+
+void Renderer_paint_sprites(Renderer *self,
+                            id<MTLRenderCommandEncoder> command_encoder,
+                            size_t *offset, Sprite *sprites,
+                            size_t num_sprites) {
+  size_t bytes_len = sizeof(Quad) * num_sprites;
+  // TODO we should double the buffer size and try again on the next draw call
+  assert(bytes_len + *offset < INSTANCE_BUFFER_SIZE);
+
+  char *contents = [self->instance_buffer contents];
+  memcpy(contents + *offset, sprites, bytes_len);
+  [self->instance_buffer
+      didModifyRange:(NSRange){(NSUInteger)offset, bytes_len}];
+
+  [command_encoder setRenderPipelineState:self->sprite_pipeline_state];
+  [command_encoder setVertexBuffer:self->instance_buffer
+                            offset:*offset
+                           atIndex:1];
+  [command_encoder setFragmentTexture:self->font_atlas atIndex:0];
+  [command_encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
+                      vertexStart:0
+                      vertexCount:4
+                    instanceCount:num_sprites];
+
+  *offset += bytes_len;
 }
 
 id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
@@ -171,6 +241,9 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
 }
 
 - (void)drawInMTKView:(MTKView *)view {
+  CGFloat scale_factor = [[view layer] contentsScale];
+  TextSystem_update_font_size(DEFAULT_FONT_SIZE, scale_factor);
+
   Renderer_paint(&state->renderer, view);
 }
 
@@ -253,6 +326,8 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
 
 @implementation ParsecAppDelegate
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+  TextSystem_init();
+
   // (Tino) TODO if there are multiple devices, we should prefer a low-power one
   // (eg. an intel CPU w/ metal instead of a dedicated GPU)
   id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -270,6 +345,10 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
 #else
   return NO;
 #endif
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+  TextSystem_destroy();
 }
 @end
 
