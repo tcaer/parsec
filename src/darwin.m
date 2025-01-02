@@ -11,9 +11,29 @@ const char SHADERS[] = {
 #embed "../build/shaders/shaders.metallib"
 };
 
+// MARK primitive decls
+
+typedef struct Vec2 {
+  float x, y;
+} Vec2;
+
+typedef struct Color {
+  float r, g, b, a;
+} Color;
+
+typedef struct Globals {
+  Vec2 viewport_size;
+} Globals;
+
+typedef struct Quad {
+  Vec2 origin, size;
+  Color background_color;
+} Quad;
+
 // MARK Renderer decls
 
 typedef struct Renderer {
+  id<MTLBuffer> instance_buffer;
   id<MTLRenderPipelineState> quad_pipeline_state;
   id<MTLCommandQueue> queue;
 } Renderer;
@@ -26,15 +46,23 @@ typedef struct WindowState {
 
 // MARK Renderer impls
 
+#define INSTANCE_BUFFER_SIZE 1024 * 1024 * 2
+
 id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
                                              id<MTLLibrary> library,
                                              NSString *vertex_name,
                                              NSString *fragment_name,
                                              NSError **err);
 
+void Renderer_paint_quads(Renderer *self,
+                          id<MTLRenderCommandEncoder> command_encoder,
+                          Quad *quads, size_t num_quads);
+
 void Renderer_init(Renderer *self, id<MTLDevice> device) {
   @autoreleasepool {
-    self->queue = [device newCommandQueue];
+    self->instance_buffer =
+        [device newBufferWithLength:INSTANCE_BUFFER_SIZE
+                            options:MTLResourceStorageModeManaged];
 
     dispatch_data_t data =
         dispatch_data_create(SHADERS, sizeof(SHADERS),
@@ -47,10 +75,13 @@ void Renderer_init(Renderer *self, id<MTLDevice> device) {
     self->quad_pipeline_state = mk_pipeline_state(
         device, library, @"quad_vertex", @"quad_fragment", &err);
     assert(err == nil);
+
+    self->queue = [device newCommandQueue];
   }
 }
 
 void Renderer_destroy(Renderer *self) {
+  self->instance_buffer = nil;
   self->quad_pipeline_state = nil;
   self->queue = nil;
 }
@@ -63,11 +94,14 @@ void Renderer_paint(Renderer *self, MTKView *view) {
     id<MTLRenderCommandEncoder> command_encoder =
         [command_buffer renderCommandEncoderWithDescriptor:desc];
 
-    [command_encoder setRenderPipelineState:self->quad_pipeline_state];
-    [command_encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
-                        vertexStart:0
-                        vertexCount:4
-                      instanceCount:1];
+    CGSize drawable_size = [view drawableSize];
+    Globals globals = (Globals){{drawable_size.width, drawable_size.height}};
+    [command_encoder setVertexBytes:&globals length:sizeof(Globals) atIndex:0];
+
+    Quad test_quads[] = {(Quad){{410, 410}, {400, 400}, {0, 1, 0, 1}},
+                         (Quad){{10, 10}, {400, 400}, {1, 0, 0, 1}}};
+
+    Renderer_paint_quads(self, command_encoder, test_quads, 2);
 
     [command_encoder endEncoding];
 
@@ -76,6 +110,25 @@ void Renderer_paint(Renderer *self, MTKView *view) {
 
     [command_buffer commit];
   }
+}
+
+void Renderer_paint_quads(Renderer *self,
+                          id<MTLRenderCommandEncoder> command_encoder,
+                          Quad *quads, size_t num_quads) {
+  size_t bytes_len = sizeof(Quad) * num_quads;
+  // TODO we should double the buffer size and try again on the next draw call
+  assert(bytes_len < INSTANCE_BUFFER_SIZE);
+
+  Quad *contents = [self->instance_buffer contents];
+  memcpy(contents, quads, bytes_len);
+  [self->instance_buffer didModifyRange:(NSRange){0, bytes_len}];
+
+  [command_encoder setRenderPipelineState:self->quad_pipeline_state];
+  [command_encoder setVertexBuffer:self->instance_buffer offset:0 atIndex:1];
+  [command_encoder drawPrimitives:MTLPrimitiveTypeTriangleStrip
+                      vertexStart:0
+                      vertexCount:4
+                    instanceCount:num_quads];
 }
 
 id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
