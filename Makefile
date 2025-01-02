@@ -5,7 +5,7 @@ TARGET := $(BIN)/parsec
 CFLAGS = -g -O0 -Wall -Wextra -Wpedantic -std=c23 -Isrc -Ibuild -DDEBUG -Wc23-extensions
 CFLAGS += -Wno-gnu-zero-variadic-macro-arguments -Wno-unused-parameter
 
-LFLAGS := -framework CoreFoundation -framework Cocoa -framework Metal -framework MetalKit
+LFLAGS := -framework CoreFoundation -framework Cocoa -framework Metal -framework MetalKit -framework QuartzCore
 
 SRCS := src/parsec.c src/darwin.m
 OBJS := $(SRCS:%=$(BIN)/%.o)

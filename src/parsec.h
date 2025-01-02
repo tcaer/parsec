@@ -30,6 +30,12 @@ typedef struct Sprite {
   Color color;
 } Sprite;
 
+typedef struct Mouse {
+  Vec2 pos;
+  Vec2 d_scroll;
+  bool pressed;
+} Mouse;
+
 // MARK TextSystem
 
 #define DEFAULT_FONT_SIZE 14
@@ -48,6 +54,6 @@ bool TextSystem_is_dirty();
 
 void UI_init();
 
-void UI_set_state(Vec2 viewport_size, Vec2 mouse_pos);
+void UI_set_state(float dt, Vec2 viewport_size, Mouse *mouse);
 
 Clay_RenderCommandArray UI_render_editor();

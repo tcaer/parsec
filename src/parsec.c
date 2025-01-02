@@ -141,24 +141,43 @@ void UI_init() {
   Clay_Initialize(arena, (Clay_Dimensions){2560, 1440});
 }
 
-void UI_set_state(Vec2 viewport_size, Vec2 mouse_pos) {
+void UI_set_state(float dt, Vec2 viewport_size, Mouse *mouse) {
   Clay_SetLayoutDimensions((Clay_Dimensions){viewport_size.x, viewport_size.y});
-  Clay_SetPointerState((Clay_Vector2){mouse_pos.x, mouse_pos.y}, false);
+  Clay_SetPointerState((Clay_Vector2){mouse->pos.x, mouse->pos.y},
+                       mouse->pressed);
+  Clay_UpdateScrollContainers(
+      true, (Clay_Vector2){mouse->d_scroll.x, mouse->d_scroll.y}, dt);
+}
+
+void TestOnClick(Clay_ElementId id, Clay_PointerData pointerInfo,
+                 intptr_t userData) {
+  if (pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
+    printf("I was clicked\n");
+  }
 }
 
 Clay_RenderCommandArray UI_render_editor() {
   Clay_BeginLayout();
 
   CLAY(CLAY_ID("EditorContainer"),
-       CLAY_LAYOUT({.sizing = {CLAY_SIZING_GROW({}), CLAY_SIZING_GROW({})}}),
+       CLAY_LAYOUT({.sizing = {CLAY_SIZING_GROW({}), CLAY_SIZING_GROW({})},
+                    .layoutDirection = CLAY_TOP_TO_BOTTOM}),
        CLAY_RECTANGLE({.color = {251, 241, 199, 255}})) {
-    CLAY(CLAY_ID("TestText"), CLAY_LAYOUT({.padding = {200, 200}})) {
+    CLAY(CLAY_ID("TestText"), CLAY_SCROLL({.vertical = true}),
+         CLAY_LAYOUT({.padding = {200, 0},
+                      .sizing = {.height = CLAY_SIZING_FIXED(400)}}),
+         CLAY_RECTANGLE({.color = {255, 0, 0, 255}})) {
       CLAY_TEXT(
           CLAY_STRING(LOREM_IPSUM),
-          CLAY_TEXT_CONFIG({.fontSize = 28,
+          CLAY_TEXT_CONFIG({.fontSize = 42,
                             .textColor = Clay_Hovered()
                                              ? (Clay_Color){0, 255, 0, 255}
                                              : (Clay_Color){0, 0, 0, 255}}));
+    }
+    CLAY(CLAY_ID("TestText2"), Clay_OnHover(TestOnClick, 0)) {
+      CLAY_TEXT(
+          CLAY_STRING("Foo, bar"),
+          CLAY_TEXT_CONFIG({.fontSize = 42, .textColor = {0, 0, 0, 255}}));
     }
   }
 
