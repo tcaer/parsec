@@ -60,19 +60,24 @@ void TextSystem_update_atlas(id<MTLTexture> atlas) {
 
 #define INSTANCE_BUFFER_SIZE 1024 * 1024 * 2
 
+void Renderer_paint_quads(Renderer *self,
+                          id<MTLRenderCommandEncoder> command_encoder,
+                          size_t *offset, Quad *quads, size_t num_quads);
+
+void Renderer_paint_sprites(Renderer *self,
+                            id<MTLRenderCommandEncoder> command_encoder,
+                            size_t *offset, Sprite *sprites,
+                            size_t num_sprites);
+
+void Renderer_encode_commands(MTKView *view, Clay_RenderCommandArray commands,
+                              Quad (*quads)[], size_t *num_quads,
+                              Sprite (*sprites)[], size_t *num_sprites);
+
 id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
                                              id<MTLLibrary> library,
                                              NSString *vertex_name,
                                              NSString *fragment_name,
                                              NSError **err);
-
-void Renderer_paint_quads(Renderer *self,
-                          id<MTLRenderCommandEncoder> command_encoder,
-                          size_t *offset, Quad *quads, size_t num_quads);
-void Renderer_paint_sprites(Renderer *self,
-                            id<MTLRenderCommandEncoder> command_encoder,
-                            size_t *offset, Sprite *sprites,
-                            size_t num_sprites);
 
 void Renderer_init(Renderer *self, id<MTLDevice> device) {
   @autoreleasepool {
@@ -116,7 +121,8 @@ void Renderer_destroy(Renderer *self) {
   self->queue = nil;
 }
 
-void Renderer_paint(Renderer *self, MTKView *view) {
+void Renderer_paint(Renderer *self, MTKView *view,
+                    Clay_RenderCommandArray commands) {
   @autoreleasepool {
     MTLRenderPassDescriptor *desc = [view currentRenderPassDescriptor];
 
@@ -128,19 +134,22 @@ void Renderer_paint(Renderer *self, MTKView *view) {
     Globals globals = (Globals){{drawable_size.width, drawable_size.height}};
     [command_encoder setVertexBytes:&globals length:sizeof(Globals) atIndex:0];
 
-    Quad quads[] = {(Quad){{410, 410}, {400, 400}, {0, 1, 0, 1}},
-                    (Quad){{10, 10}, {400, 400}, {1, 0, 0, 1}}};
-    Sprite *sprites;
-    TextSystem_layout("foo, bar", 8, (Vec2){20, 120}, &sprites);
+    // TODO these fixed arrays will definitely not scale, these should by
+    // vectors. For testing it's fine
+    Quad quads[512];
+    Sprite sprites[4000];
+    size_t num_quads = 0;
+    size_t num_sprites = 0;
+    Renderer_encode_commands(view, commands, &quads, &num_quads, &sprites,
+                             &num_sprites);
+    // TextSystem_layout("foo, bar", 8, (Vec2){20, 120}, sprites);
     TextSystem_update_atlas(self->font_atlas);
 
     size_t instance_offset = 0;
-    Renderer_paint_quads(self, command_encoder, &instance_offset, quads, 2);
-    if (sprites != NULL) {
-      Renderer_paint_sprites(self, command_encoder, &instance_offset, sprites,
-                             8);
-      free(sprites);
-    }
+    Renderer_paint_quads(self, command_encoder, &instance_offset, quads,
+                         num_quads);
+    Renderer_paint_sprites(self, command_encoder, &instance_offset, sprites,
+                           num_sprites);
 
     [command_encoder endEncoding];
 
@@ -154,6 +163,9 @@ void Renderer_paint(Renderer *self, MTKView *view) {
 void Renderer_paint_quads(Renderer *self,
                           id<MTLRenderCommandEncoder> command_encoder,
                           size_t *offset, Quad *quads, size_t num_quads) {
+  if (num_quads == 0)
+    return;
+
   size_t bytes_len = sizeof(Quad) * num_quads;
   // TODO we should double the buffer size and try again on the next draw call
   assert(bytes_len + *offset < INSTANCE_BUFFER_SIZE);
@@ -179,6 +191,9 @@ void Renderer_paint_sprites(Renderer *self,
                             id<MTLRenderCommandEncoder> command_encoder,
                             size_t *offset, Sprite *sprites,
                             size_t num_sprites) {
+  if (num_sprites == 0)
+    return;
+
   size_t bytes_len = sizeof(Quad) * num_sprites;
   // TODO we should double the buffer size and try again on the next draw call
   assert(bytes_len + *offset < INSTANCE_BUFFER_SIZE);
@@ -199,6 +214,45 @@ void Renderer_paint_sprites(Renderer *self,
                     instanceCount:num_sprites];
 
   *offset += bytes_len;
+}
+
+void Renderer_encode_commands(MTKView *view, Clay_RenderCommandArray commands,
+                              Quad (*quads)[], size_t *num_quads,
+                              Sprite (*sprites)[], size_t *num_sprites) {
+  // TODO this system is not correct if there are multiple layers to render.
+  // Clay returns commands sorted from back to front and shufflign this order to
+  // fit into instances loses this information
+  for (unsigned int i = 0; i < commands.length; i++) {
+    Clay_RenderCommand *command = Clay_RenderCommandArray_Get(&commands, i);
+    Clay_BoundingBox bounding_box = command->boundingBox;
+
+    // TODO exhaust this switch
+    switch (command->commandType) {
+    case CLAY_RENDER_COMMAND_TYPE_NONE:
+      break;
+    case CLAY_RENDER_COMMAND_TYPE_RECTANGLE: {
+      Clay_RectangleElementConfig *config =
+          command->config.rectangleElementConfig;
+      (*quads)[*num_quads] = (Quad){
+          {bounding_box.x, bounding_box.y},
+          {bounding_box.width, bounding_box.height},
+          {config->color.r / 255, config->color.g / 255, config->color.b / 255,
+           config->color.a / 255},
+      };
+      (*num_quads)++;
+      break;
+    }
+    // TODO this switch does not account for any config like font size
+    case CLAY_RENDER_COMMAND_TYPE_TEXT: {
+      Clay_TextElementConfig *config = command->config.textElementConfig;
+      Sprite *offset = (*sprites) + *num_sprites;
+      TextSystem_layout(command->text.chars, command->text.length,
+                        (Vec2){bounding_box.x, bounding_box.y}, config, offset);
+      *num_sprites += command->text.length;
+      break;
+    }
+    }
+  }
 }
 
 id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
@@ -241,10 +295,11 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
 }
 
 - (void)drawInMTKView:(MTKView *)view {
-  CGFloat scale_factor = [[view layer] contentsScale];
-  TextSystem_update_font_size(DEFAULT_FONT_SIZE, scale_factor);
+  CGSize viewport_size = [view drawableSize];
+  UI_set_state((Vec2){viewport_size.width, viewport_size.height});
+  Clay_RenderCommandArray commands = UI_render_editor();
 
-  Renderer_paint(&state->renderer, view);
+  Renderer_paint(&state->renderer, view, commands);
 }
 
 - (void)setState:(WindowState *)new_state {
@@ -327,6 +382,7 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
 @implementation ParsecAppDelegate
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
   TextSystem_init();
+  UI_init();
 
   // (Tino) TODO if there are multiple devices, we should prefer a low-power one
   // (eg. an intel CPU w/ metal instead of a dedicated GPU)

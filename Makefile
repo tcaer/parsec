@@ -13,7 +13,7 @@ OBJS := $(SRCS:%=$(BIN)/%.o)
 SHADERS_SRCS := shaders/shaders.metal
 SHADERS := $(SHADERS_SRCS:%.metal=$(BIN)/%.metallib)
 
-LIBS := build/fontstash/fontstash.h
+LIBS := build/fontstash/fontstash.h build/clay/clay.h
 
 $(TARGET): $(LIBS) $(SHADERS) $(OBJS)
 	@clang $(CFLAGS) $(LFLAGS) $(OBJS) -o $@
@@ -40,13 +40,21 @@ $(BIN)/shaders/%.ir: shaders/%.metal
 
 build/fontstash/fontstash.h:
 	@mkdir -p $(@D)
-	@git clone https://github.com/memononen/fontstash
+	@git clone -q https://github.com/memononen/fontstash
 	@mv fontstash/src/fontstash.h build/fontstash
 	@mv fontstash/src/stb_truetype.h build/fontstash
 	@rm -rf fontstash
+	@echo == setup fontstash ==
+
+build/clay/clay.h:
+	@mkdir -p $(@D)
+# pin clay to v0.12
+	@git clone -q https://github.com/nicbarker/clay && cd clay && git checkout -q 2f67b612560cca6aadb145560beffae7a0460534 && cd ..
+	@mv clay/clay.h build/clay
+	@rm -rf clay
+	@echo == setup clay ==
 
 .PHONY: clean
 clean:
 	@rm -rf $(BIN)
-	@rm -rf lib
 	@echo == cleaned ==
