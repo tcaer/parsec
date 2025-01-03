@@ -56,4 +56,4 @@ void UI_init();
 
 void UI_set_state(float dt, Vec2 viewport_size, Mouse *mouse);
 
-Clay_RenderCommandArray UI_render_editor();
+Clay_RenderCommandArray EditorView_render();

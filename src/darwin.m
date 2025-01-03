@@ -316,7 +316,7 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
   UI_set_state(dt, (Vec2){viewport_size.width, viewport_size.height},
                &state->mouse);
 
-  Clay_RenderCommandArray commands = UI_render_editor();
+  Clay_RenderCommandArray commands = EditorView_render();
   Renderer_paint(&state->renderer, view, commands);
 }
 
@@ -434,9 +434,6 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
 
 @implementation ParsecAppDelegate
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
-  TextSystem_init();
-  UI_init();
-
   // TODO if there are multiple devices, we should prefer a low-power one
   // (eg. an intel CPU w/ metal instead of a dedicated GPU)
   id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -462,6 +459,9 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
 @end
 
 int main() {
+  TextSystem_init();
+  UI_init();
+
   NSApplication *app = [NSApplication sharedApplication];
 
   ParsecAppDelegate *del = NS_NEW(ParsecAppDelegate);

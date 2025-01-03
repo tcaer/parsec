@@ -79,57 +79,6 @@ Clay_Dimensions TextSystem_measure_text(Clay_String *text,
 
 // MARK UI impls
 
-const char LOREM_IPSUM[] =
-    "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Proin dignissim "
-    "eros eu vehicula venenatis. Nullam posuere mollis massa. Maecenas "
-    "malesuada magna quis gravida semper. Cras lacinia quis magna quis "
-    "iaculis. Quisque quis risus ullamcorper, cursus nisi a, interdum libero. "
-    "Nunc a blandit risus. Praesent bibendum lacus eu justo lacinia "
-    "vestibulum. Proin ut lectus non quam sodales efficitur. Aenean et quam "
-    "vestibulum, finibus felis a, vulputate felis. Suspendisse eu cursus eros. "
-    "Phasellus eu lobortis mauris, id facilisis lectus. Aenean ac tellus ut "
-    "lacus imperdiet dictum et et metus. Pellentesque condimentum non dui at "
-    "porttitor. Donec a erat nec est lobortis tempor gravida nec ligula. "
-    "Phasellus pulvinar eros at mi ullamcorper pulvinar.\nQuisque hendrerit "
-    "mollis sapien quis blandit. Morbi id massa arcu. Cras mattis justo "
-    "hendrerit, interdum tellus sed, congue lacus. Vestibulum non risus nunc. "
-    "Sed molestie sem sit amet neque finibus, in consequat dolor feugiat. "
-    "Integer in ante sed nisi tincidunt tristique. Fusce pretium nulla at orci "
-    "bibendum, a pulvinar nisi pharetra.\nCurabitur sit amet turpis "
-    "tincidunt, "
-    "posuere ligula eget, semper tellus. In hac habitasse platea dictumst. Sed "
-    "a leo ante. Cras ornare hendrerit dui ac pretium. Aliquam suscipit sapien "
-    "urna, et fringilla lacus vehicula ac. Pellentesque ultricies porta enim, "
-    "sed bibendum felis sagittis non. Quisque consequat vulputate justo, nec "
-    "fermentum eros condimentum sed. Aliquam erat volutpat. Phasellus "
-    "consequat eleifend ex, id luctus nisl consectetur vitae. Vestibulum ante "
-    "ipsum primis in faucibus orci luctus et ultrices posuere cubilia curae; "
-    "In ac lorem faucibus, efficitur lacus sollicitudin, venenatis "
-    "dolor.\nCurabitur nisl nunc, consectetur tincidunt ligula ut, sodales "
-    "interdum mauris. Nam in luctus nisi. Donec sodales accumsan augue, sit "
-    "amet malesuada tellus scelerisque sit amet. Vivamus diam augue, tincidunt "
-    "in urna ut, luctus fringilla justo. Duis tempor sapien ut nibh vulputate "
-    "blandit eu in massa. Aenean eget enim consequat, viverra arcu in, maximus "
-    "ligula. Aliquam erat volutpat. Class aptent taciti sociosqu ad litora "
-    "torquent per conubia nostra, per inceptos himenaeos. Sed luctus nunc id "
-    "nibh semper efficitur lobortis in ipsum. Nam vel erat tempus, mollis nunc "
-    "vitae, elementum elit. Duis dignissim fermentum tellus a ullamcorper. "
-    "Aenean in ante at ligula eleifend volutpat non consectetur ex.\nSed sit "
-    "amet condimentum augue, sit amet interdum orci. Sed aliquet eu ligula et "
-    "faucibus. Vestibulum in justo feugiat dolor vestibulum commodo in ac est. "
-    "Nam sit amet tincidunt massa, at malesuada nulla. Donec ac imperdiet "
-    "nulla. Mauris ante velit, tincidunt eget elit at, ultrices dictum arcu. "
-    "Curabitur faucibus vel orci id auctor. Maecenas vestibulum nisi et "
-    "tristique imperdiet. Aenean eleifend nisl sit amet massa hendrerit, nec "
-    "dictum est dictum. Integer facilisis quis magna a varius. Phasellus "
-    "convallis egestas arcu, vel maximus nisl tristique maximus. Vivamus "
-    "vestibulum augue enim, vel venenatis urna interdum ut. Aliquam "
-    "condimentum, orci nec efficitur finibus, tellus enim lacinia sem, vel "
-    "scelerisque tortor nunc volutpat tortor. Duis blandit, odio in "
-    "ullamcorper imperdiet, tellus odio cursus tellus, vitae tincidunt tortor "
-    "mi a magna. Nam vulputate orci vel justo suscipit, vitae imperdiet lorem "
-    "sodales.";
-
 void *clay_memory;
 
 void UI_init() {
@@ -146,38 +95,47 @@ void UI_set_state(float dt, Vec2 viewport_size, Mouse *mouse) {
   Clay_SetPointerState((Clay_Vector2){mouse->pos.x, mouse->pos.y},
                        mouse->pressed);
   Clay_UpdateScrollContainers(
-      true, (Clay_Vector2){mouse->d_scroll.x, mouse->d_scroll.y}, dt);
+      false, (Clay_Vector2){mouse->d_scroll.x, mouse->d_scroll.y}, dt);
 }
 
-void TestOnClick(Clay_ElementId id, Clay_PointerData pointerInfo,
-                 intptr_t userData) {
-  if (pointerInfo.state == CLAY_POINTER_DATA_PRESSED_THIS_FRAME) {
-    printf("I was clicked\n");
+// MARK UI component impls
+
+// MARK EditorView impls
+
+void EditorView_render_line(Clay_String text, int idx) {
+  CLAY(CLAY_IDI("EditorLine", idx),
+       CLAY_LAYOUT(
+           {.sizing = {.width = CLAY_SIZING_GROW({})}, .childGap = 28})) {
+    CLAY(CLAY_IDI("EditorLineNumberGutter", idx),
+         CLAY_LAYOUT({.sizing = {.width = CLAY_SIZING_FIXED(28 * 3)},
+                      .childAlignment = {.x = CLAY_ALIGN_X_RIGHT}})) {
+      CLAY_TEXT(CLAY_STRING("000"),
+                CLAY_TEXT_CONFIG(
+                    {.textColor = {124, 111, 100, 255}, .fontSize = 28}));
+    }
+    CLAY_TEXT(text,
+              CLAY_TEXT_CONFIG({.fontSize = 28, .textColor = {0, 0, 0, 255}}));
   }
 }
 
-Clay_RenderCommandArray UI_render_editor() {
+Clay_RenderCommandArray EditorView_render() {
   Clay_BeginLayout();
 
   CLAY(CLAY_ID("EditorContainer"),
        CLAY_LAYOUT({.sizing = {CLAY_SIZING_GROW({}), CLAY_SIZING_GROW({})},
                     .layoutDirection = CLAY_TOP_TO_BOTTOM}),
        CLAY_RECTANGLE({.color = {251, 241, 199, 255}})) {
-    CLAY(CLAY_ID("TestText"), CLAY_SCROLL({.vertical = true}),
-         CLAY_LAYOUT({.padding = {200, 0},
-                      .sizing = {.height = CLAY_SIZING_FIXED(400)}}),
-         CLAY_RECTANGLE({.color = {255, 0, 0, 255}})) {
-      CLAY_TEXT(
-          CLAY_STRING(LOREM_IPSUM),
-          CLAY_TEXT_CONFIG({.fontSize = 42,
-                            .textColor = Clay_Hovered()
-                                             ? (Clay_Color){0, 255, 0, 255}
-                                             : (Clay_Color){0, 0, 0, 255}}));
-    }
-    CLAY(CLAY_ID("TestText2"), Clay_OnHover(TestOnClick, 0)) {
-      CLAY_TEXT(
-          CLAY_STRING("Foo, bar"),
-          CLAY_TEXT_CONFIG({.fontSize = 42, .textColor = {0, 0, 0, 255}}));
+    CLAY(CLAY_ID("TitleBarFiller"),
+         CLAY_LAYOUT(
+             {.sizing = {CLAY_SIZING_GROW({}), CLAY_SIZING_FIXED(56)}})) {}
+
+    CLAY(CLAY_ID("EditorContents"),
+         CLAY_LAYOUT({.sizing = {CLAY_SIZING_GROW({}), CLAY_SIZING_GROW({})},
+                      .layoutDirection = CLAY_TOP_TO_BOTTOM}),
+         CLAY_SCROLL({.vertical = true})) {
+      for (int i = 0; i < 100; i++) {
+        EditorView_render_line(CLAY_STRING("// TODO implement this"), i);
+      }
     }
   }
 
