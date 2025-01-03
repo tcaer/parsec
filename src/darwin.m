@@ -316,8 +316,14 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
   UI_set_state(dt, (Vec2){viewport_size.width, viewport_size.height},
                &state->mouse);
 
-  Clay_RenderCommandArray commands = EditorView_render();
+  char memory[MEGABYTE * 2];
+  Arena *arena = BumpArena_create(memory, sizeof(memory));
+
+  UIContext ctx = {arena};
+  Clay_RenderCommandArray commands = EditorView_render(&ctx);
   Renderer_paint(&state->renderer, view, commands);
+
+  Arena_release(arena);
 }
 
 - (void)mouseMoved:(NSEvent *)event {

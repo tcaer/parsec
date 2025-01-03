@@ -2,6 +2,42 @@
 #define CLAY_IMPLEMENTATION
 #include "parsec.h"
 
+// MARK Arenas
+
+Arena *BumpArena_create(char *memory, size_t capacity) {
+  BumpArena *self = malloc(sizeof(BumpArena));
+  self->capacity = capacity;
+  self->offset = 0;
+  self->memory = memory;
+
+  Arena *arena = malloc(sizeof(Arena));
+  arena->arena = self;
+  arena->release = BumpArena_release;
+  arena->alloc = BumpArena_alloc;
+  arena->free = BumpArena_free;
+
+  return arena;
+}
+
+void BumpArena_release(Arena *arena) {
+  free(arena->arena);
+  free(arena);
+}
+
+void *BumpArena_alloc(void *_self, size_t size) {
+  BumpArena *self = _self;
+
+  assert(self->offset + size < self->capacity);
+
+  void *alloced = self->memory + self->offset;
+  self->offset += size;
+  return alloced;
+}
+
+void BumpArena_free(void *_self, void *ptr) {
+  // noop
+}
+
 // MARK FontSystem impls
 
 #define TEXT_ATLAS_SIZE 512
@@ -102,23 +138,28 @@ void UI_set_state(float dt, Vec2 viewport_size, Mouse *mouse) {
 
 // MARK EditorView impls
 
-void EditorView_render_line(Clay_String text, int idx) {
+void EditorView_render_line(UIContext *ctx, Clay_String text, int idx) {
+  char temp[256];
+  int length = snprintf(temp, sizeof(temp), "%i", idx);
+  char *str = Arena_alloc(ctx->arena, char, length);
+  memcpy(str, temp, length);
+  Clay_String cl_str = {length, str};
+
   CLAY(CLAY_IDI("EditorLine", idx),
        CLAY_LAYOUT(
            {.sizing = {.width = CLAY_SIZING_GROW({})}, .childGap = 28})) {
     CLAY(CLAY_IDI("EditorLineNumberGutter", idx),
          CLAY_LAYOUT({.sizing = {.width = CLAY_SIZING_FIXED(28 * 3)},
                       .childAlignment = {.x = CLAY_ALIGN_X_RIGHT}})) {
-      CLAY_TEXT(CLAY_STRING("000"),
-                CLAY_TEXT_CONFIG(
-                    {.textColor = {124, 111, 100, 255}, .fontSize = 28}));
+      CLAY_TEXT(cl_str, CLAY_TEXT_CONFIG({.textColor = {124, 111, 100, 255},
+                                          .fontSize = 28}));
     }
     CLAY_TEXT(text,
               CLAY_TEXT_CONFIG({.fontSize = 28, .textColor = {0, 0, 0, 255}}));
   }
 }
 
-Clay_RenderCommandArray EditorView_render() {
+Clay_RenderCommandArray EditorView_render(UIContext *ctx) {
   Clay_BeginLayout();
 
   CLAY(CLAY_ID("EditorContainer"),
@@ -134,7 +175,7 @@ Clay_RenderCommandArray EditorView_render() {
                       .layoutDirection = CLAY_TOP_TO_BOTTOM}),
          CLAY_SCROLL({.vertical = true})) {
       for (int i = 0; i < 100; i++) {
-        EditorView_render_line(CLAY_STRING("// TODO implement this"), i);
+        EditorView_render_line(ctx, CLAY_STRING("// TODO implement this"), i);
       }
     }
   }
