@@ -2,7 +2,7 @@
 #define CLAY_IMPLEMENTATION
 #include "parsec.h"
 
-// MARK Arenas
+// MARK Arenas impls
 
 Arena *BumpArena_create(char *memory, size_t capacity) {
   BumpArena *self = malloc(sizeof(BumpArena));
@@ -38,23 +38,22 @@ void BumpArena_free(void *_self, void *ptr) {
   // noop
 }
 
-// MARK TextSystem
+// MARK GapBuffer impls
 
 void GapBuffer_init(GapBuffer *self) {
-  self->text = calloc(GAP_SIZE, sizeof(char));
-  self->cursor = self->text;
-  self->gap_start = self->text;
-  self->gap_end = self->text + GAP_SIZE;
-  self->text_end = self->gap_end;
+  self->buffer = calloc(GAP_SIZE, sizeof(char));
+  self->gap_start = self->buffer;
+  self->gap_end = self->buffer + GAP_SIZE;
+  self->buffer_end = self->gap_end;
 }
 
-void GapBuffer_destroy(GapBuffer *self) { free(self->text); }
+void GapBuffer_destroy(GapBuffer *self) { free(self->buffer); }
 
-size_t GapBuffer_full_length(GapBuffer *self) {
-  return self->text_end - self->text;
+static inline size_t GapBuffer_full_length(GapBuffer *self) {
+  return self->buffer_end - self->buffer;
 }
 
-size_t GapBuffer_gap_length(GapBuffer *self) {
+static inline size_t GapBuffer_gap_length(GapBuffer *self) {
   return self->gap_start - self->gap_end;
 }
 
@@ -63,7 +62,7 @@ void GapBuffer_move_chars(GapBuffer *self, char *dest, char *src, size_t len) {
     return;
 
   if (src > dest) {
-    if (src + len >= self->text_end)
+    if (src + len >= self->buffer_end)
       return;
     for (; len > 0; len--) {
       *(dest++) = *(src++);
@@ -77,78 +76,134 @@ void GapBuffer_move_chars(GapBuffer *self, char *dest, char *src, size_t len) {
   }
 }
 
-void GapBuffer_move_gap_to_point(GapBuffer *self) {
-  if (self->cursor == self->gap_start)
+void GapBuffer_move_gap_to_selection(GapBuffer *self, Selection *sel) {
+  char *head = self->buffer + sel->head;
+
+  // The gap is already at the head
+  if (head == self->gap_start)
     return;
 
-  if (self->cursor == self->gap_end) {
-    self->cursor = self->gap_start;
-    return;
-  }
-
-  if (self->cursor < self->gap_start) {
-    GapBuffer_move_chars(self, self->cursor + (self->gap_end - self->gap_start),
-                         self->cursor, self->gap_start - self->cursor);
-    self->gap_end -= self->gap_start - self->cursor;
-    self->gap_start = self->cursor;
+  // Shift gap left
+  if (head < self->gap_start) {
+    size_t len = GapBuffer_gap_length(self);
+    GapBuffer_move_chars(self, head + len, head, len);
+    self->gap_start = head;
+    self->gap_end = head + len;
   } else {
+    size_t len = head - self->gap_end;
     GapBuffer_move_chars(self, self->gap_start, self->gap_end,
-                         self->cursor - self->gap_end);
-    self->gap_start += self->cursor - self->gap_end;
-    self->gap_end = self->cursor;
-    self->cursor = self->gap_start;
+                         head - self->gap_end);
+    self->gap_start += len;
+    self->gap_end = head;
   }
 }
 
 void GapBuffer_extend_buffer(GapBuffer *self, size_t size) {
-  char *orig = self->text;
+  char *orig = self->buffer;
   size_t new_size = GapBuffer_full_length(self) + size;
-  self->text = realloc(self->text, new_size);
+  self->buffer = realloc(self->buffer, new_size);
 
-  size_t mem_offset = self->text - orig;
+  size_t mem_offset = self->buffer - orig;
 
-  self->cursor += mem_offset;
-  self->text_end += mem_offset;
+  self->buffer_end += mem_offset;
   self->gap_start += mem_offset;
   self->gap_end += mem_offset;
 }
 
 void GapBuffer_extend_gap(GapBuffer *self) {
-  if (self->gap_end - self->gap_start >= GAP_SIZE)
+  if (self->gap_end - self->gap_start > 0)
     return;
 
   GapBuffer_extend_buffer(self, GAP_SIZE);
   GapBuffer_move_chars(self, self->gap_end + GAP_SIZE, self->gap_end,
-                       self->text_end - self->gap_end);
+                       self->buffer_end - self->gap_end);
 
   self->gap_end += GAP_SIZE;
-  self->text_end += GAP_SIZE;
+  self->buffer_end += GAP_SIZE;
 }
 
-void GapBuffer_insert_char(GapBuffer *self, char c) {
-  if (self->cursor != self->gap_start)
-    GapBuffer_move_gap_to_point(self);
-
-  if (self->gap_start == self->gap_end)
-    GapBuffer_extend_gap(self);
+void GapBuffer_put_char(GapBuffer *self, Selection *sel, char c) {
+  GapBuffer_move_gap_to_selection(self, sel);
+  GapBuffer_extend_gap(self);
 
   *(self->gap_start++) = c;
 }
 
-void GapBuffer_put_char(GapBuffer *self, char c) {
-  GapBuffer_insert_char(self, c);
-  self->cursor++;
-}
+void GapBuffer_delete_chars(GapBuffer *self, Selection *sel) {
+  GapBuffer_move_gap_to_selection(self, sel);
 
-void GapBuffer_delete_char(GapBuffer *self) {
-  if (self->cursor == self->text)
+  if (self->gap_start == self->buffer)
     return;
 
-  if (self->cursor != self->gap_start)
-    GapBuffer_move_gap_to_point(self);
-
-  self->cursor--;
   *(--self->gap_start) = 0;
+}
+
+// MARK TextEditor impls
+
+void TextEditor_init(TextEditor *self) {
+  memset(&self->selection, 0, sizeof(Selection));
+  GapBuffer_init(&self->buffer);
+}
+
+void TextEditor_handle_key(TextEditor *self, char c) {
+  switch ((int)c) {
+  // Backspace
+  case 127:
+    GapBuffer_delete_chars(&self->buffer, &self->selection);
+    self->selection.anchor = --self->selection.head;
+    break;
+  default:
+    GapBuffer_put_char(&self->buffer, &self->selection, c);
+    self->selection.anchor = ++self->selection.head;
+    break;
+  }
+}
+
+typedef struct TextEditorLineIter {
+  char *curr;
+  size_t line_number;
+} TextEditorLineIter;
+
+void TextEditorLineIter_init(TextEditorLineIter *self, TextEditor *editor) {
+  self->line_number = 0;
+  self->curr = editor->buffer.buffer;
+}
+
+static inline bool is_new_line(char c) { return c == '\r' || c == '\n'; }
+
+bool TextEditorLineIter_next(TextEditorLineIter *self, TextEditor *editor,
+                             Arena *arena, char **line, size_t *len) {
+  if (self->curr > editor->buffer.buffer_end)
+    return false;
+
+  self->line_number++;
+  char *start = self->curr;
+  char *end = editor->buffer.buffer_end;
+  for (; self->curr <= editor->buffer.buffer_end; self->curr++) {
+    if (is_new_line(*self->curr)) {
+      end = self->curr;
+      self->curr++;
+      break;
+    }
+  }
+
+  // Mask the gap from the line by writing user contents into new buffer
+  if (start <= editor->buffer.gap_start && editor->buffer.gap_end <= end) {
+    *len = (end - start) - (editor->buffer.gap_end - editor->buffer.gap_start);
+    *line = Arena_alloc(arena, char, *len);
+    // copy before gap
+    size_t stride = editor->buffer.gap_start - start;
+    memcpy(*line, start, stride);
+    // copy after gap
+    memcpy(*line + stride,
+           start + stride + GapBuffer_gap_length(&editor->buffer),
+           end - editor->buffer.gap_end);
+  } else {
+    *len = end - start;
+    *line = start;
+  }
+
+  return true;
 }
 
 // MARK FontSystem impls
@@ -266,9 +321,10 @@ void EditorLine_render_gutter(UIContext *ctx, size_t idx) {
 
 void EditorLine_render_cursor(UIContext *ctx, char *start, size_t idx) {
   float offset = 0;
-  if (start < ctx->text->cursor) {
+  char *head = ctx->editor->buffer.buffer + ctx->editor->selection.head;
+  if (start < head) {
     Clay_TextElementConfig *cfg = CLAY_TEXT_CONFIG({.fontSize = 28});
-    Clay_String text = {ctx->text->cursor - start, start};
+    Clay_String text = {head - start, start};
     Clay_Dimensions dims = FontSystem_measure_text(&text, cfg);
     offset = dims.width;
   }
@@ -279,51 +335,29 @@ void EditorLine_render_cursor(UIContext *ctx, char *start, size_t idx) {
        CLAY_RECTANGLE({.color = {0, 0, 0, 255}})) {}
 }
 
-void EditorLine_render(UIContext *ctx, char *start, char *end, size_t idx) {
-  Clay_String line_str;
-  if (end == start) {
-    line_str = (Clay_String){0, ""};
-  } else if (start <= ctx->text->gap_start && end >= ctx->text->gap_end) {
-    size_t len = ctx->text->gap_start - start + end - ctx->text->gap_end;
-    char *text = Arena_alloc(ctx->arena, char, len);
-    memcpy(text, start, ctx->text->gap_start - start);
-    memcpy(text + (ctx->text->gap_start - start), start,
-           end - ctx->text->gap_end);
-    line_str = (Clay_String){len, text};
-  } else {
-    line_str = (Clay_String){end - start, start};
-  }
+void EditorLine_render(UIContext *ctx, size_t row_idx, char *line, size_t len) {
+  Clay_String line_str = {len, line};
 
-  bool has_cursor = start <= ctx->text->cursor && ctx->text->cursor <= end;
-
-  CLAY(CLAY_IDI("EditorLine", idx),
+  CLAY(CLAY_IDI("EditorLine", row_idx),
        CLAY_LAYOUT(
            {.sizing = {.width = CLAY_SIZING_GROW({})}, .childGap = 28})) {
-    EditorLine_render_gutter(ctx, idx);
-    CLAY(CLAY_IDI("EditorLineText", idx)) {
+    EditorLine_render_gutter(ctx, row_idx);
+    CLAY(CLAY_IDI("EditorLineText", row_idx)) {
       CLAY_TEXT(line_str, CLAY_TEXT_CONFIG(
                               {.fontSize = 28, .textColor = {0, 0, 0, 255}}));
-      if (has_cursor) {
-        EditorLine_render_cursor(ctx, start, idx);
-      }
     }
   }
 }
 
 void EditorView_render_editor(UIContext *ctx) {
-  char *line_start = ctx->text->text;
-  char *curr = line_start;
-  size_t row_idx = 1;
+  TextEditorLineIter iter = {0};
+  TextEditorLineIter_init(&iter, ctx->editor);
 
-  for (; curr <= ctx->text->text_end; curr++) {
-    if (*curr == '\n' || *curr == '\r') {
-      EditorLine_render(ctx, line_start, curr, row_idx++);
-      line_start = curr + 1;
-    }
+  char *line = NULL;
+  size_t len;
+  while (TextEditorLineIter_next(&iter, ctx->editor, ctx->arena, &line, &len)) {
+    EditorLine_render(ctx, iter.line_number, line, len);
   }
-
-  if (line_start < curr)
-    EditorLine_render(ctx, line_start, curr - 1, row_idx);
 }
 
 Clay_RenderCommandArray EditorView_render(UIContext *ctx) {

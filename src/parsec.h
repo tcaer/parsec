@@ -28,11 +28,20 @@ typedef struct Color {
   float r, g, b, a;
 } Color;
 
+typedef struct Globals {
+  Vec2 viewport_size;
+} Globals;
+
 typedef struct Sprite {
   Vec2 origin, size;
   Vec2 uv_origin, uv_size;
   Color color;
 } Sprite;
+
+typedef struct Quad {
+  Vec2 origin, size;
+  Color background_color;
+} Quad;
 
 typedef struct Mouse {
   Vec2 pos;
@@ -40,7 +49,7 @@ typedef struct Mouse {
   bool pressed;
 } Mouse;
 
-// MARK Arenas
+// MARK Arena decls
 
 typedef struct Arena {
   void *arena;
@@ -72,14 +81,13 @@ void *BumpArena_alloc(void *_self, size_t size);
 
 void BumpArena_free(void *_self, void *ptr);
 
-// MARK TextSystem
+// MARK GapBuffer decls
 
 #define GAP_SIZE 20
 
 typedef struct GapBuffer {
-  char *cursor;
-  char *text;
-  char *text_end;
+  char *buffer;
+  char *buffer_end;
   char *gap_start;
   char *gap_end;
 } GapBuffer;
@@ -88,11 +96,23 @@ void GapBuffer_init(GapBuffer *self);
 
 void GapBuffer_destroy(GapBuffer *self);
 
-size_t GapBuffer_full_length(GapBuffer *self);
+typedef struct Selection {
+  // anchor is the start of the selection, head is where the selection is extended to.
+  // head can be extended to be before or after the anchor
+  size_t anchor, head;
+} Selection;
 
-void GapBuffer_put_char(GapBuffer *self, char c);
+// MARK TextEditor decls
 
-void GapBuffer_delete_char(GapBuffer *self);
+typedef struct TextEditor {
+  GapBuffer buffer;
+  Selection selection;
+} TextEditor;
+
+void TextEditor_init(TextEditor *self);
+
+// TODO doesn't handle utf-8 or modifiers
+void TextEditor_handle_key(TextEditor *self, char c);
 
 // MARK FontSystem
 
@@ -114,7 +134,7 @@ bool FontSystem_is_dirty();
 
 typedef struct UIContext {
   Arena *arena;
-  GapBuffer *text;
+  TextEditor *editor;
 } UIContext;
 
 void UI_init();

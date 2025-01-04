@@ -13,17 +13,6 @@ static const char SHADERS[] = {
 #embed "../build/shaders/shaders.metallib"
 };
 
-// MARK primitive decls
-
-typedef struct Globals {
-  Vec2 viewport_size;
-} Globals;
-
-typedef struct Quad {
-  Vec2 origin, size;
-  Color background_color;
-} Quad;
-
 // MARK Renderer decls
 
 typedef struct Renderer {
@@ -39,7 +28,7 @@ typedef struct Renderer {
 typedef struct WindowState {
   Mouse mouse;
   Renderer renderer;
-  GapBuffer text;
+  TextEditor editor;
 } WindowState;
 
 // MARK FontSystem impls
@@ -320,7 +309,7 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
   char memory[MEGABYTE * 2];
   Arena *arena = BumpArena_create(memory, sizeof(memory));
 
-  UIContext ctx = {arena, &state->text};
+  UIContext ctx = {arena, &state->editor};
   Clay_RenderCommandArray commands = EditorView_render(&ctx);
   Renderer_paint(&state->renderer, view, commands);
 
@@ -362,20 +351,12 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
 }
 
 - (void)keyDown:(NSEvent *)event {
-  switch ([event keyCode]) {
-  // (Tino) TODO: standardize this and make it platform agnostic
-  case 51:
-    GapBuffer_delete_char(&state->text);
-    break;
-  default:
-    NSString *chars = [event charactersIgnoringModifiers];
-    if ([chars length] == 0)
-      return;
+  NSString *chars = [event charactersIgnoringModifiers];
+  if ([chars length] == 0)
+    return;
 
-    // TODO this doesn't handle utf-8
-    char c = [chars characterAtIndex:0];
-    GapBuffer_put_char(&state->text, c);
-  }
+  // TODO this doesn't handle utf-8
+  TextEditor_handle_key(&state->editor, [chars characterAtIndex:0]);
 }
 @end
 
@@ -399,7 +380,7 @@ ParsecWindowArgs ParsecWindowArgs_default() {
 @implementation ParsecWindow
 - (void)windowWillClose:(NSNotification *)notification {
   Renderer_destroy(&state->renderer);
-  GapBuffer_destroy(&state->text);
+  GapBuffer_destroy(&state->editor.buffer);
 
   free(state);
   state = NULL;
@@ -448,7 +429,7 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
   WindowState *state = calloc(1, sizeof(WindowState));
   state->mouse.pos = (Vec2){-10, -10};
   Renderer_init(&state->renderer, device);
-  GapBuffer_init(&state->text);
+  TextEditor_init(&state->editor);
 
   [win setState:state];
   [view setState:state];
