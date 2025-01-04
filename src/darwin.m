@@ -39,12 +39,13 @@ typedef struct Renderer {
 typedef struct WindowState {
   Mouse mouse;
   Renderer renderer;
+  GapBuffer text;
 } WindowState;
 
-// MARK TextSystem impls
+// MARK FontSystem impls
 
 void TextSystem_update_atlas(id<MTLTexture> atlas) {
-  if (!TextSystem_is_dirty())
+  if (!FontSystem_is_dirty())
     return;
 
   int width, height;
@@ -232,7 +233,7 @@ void Renderer_encode_commands(Renderer *self, MTKView *view,
 
       size_t num_sprites = 0;
       Sprite sprites[4000];
-      TextSystem_layout(command->text.chars, command->text.length,
+      FontSystem_layout(command->text.chars, command->text.length,
                         (Vec2){bounding_box.x, bounding_box.y}, config, sprites,
                         &num_sprites);
 
@@ -319,11 +320,15 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
   char memory[MEGABYTE * 2];
   Arena *arena = BumpArena_create(memory, sizeof(memory));
 
-  UIContext ctx = {arena};
+  UIContext ctx = {arena, &state->text};
   Clay_RenderCommandArray commands = EditorView_render(&ctx);
   Renderer_paint(&state->renderer, view, commands);
 
   Arena_release(arena);
+}
+
+- (BOOL)acceptsFirstResponder {
+  return YES;
 }
 
 - (void)mouseMoved:(NSEvent *)event {
@@ -355,6 +360,23 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
 - (void)mouseUp:(NSEvent *)event {
   state->mouse.pressed = false;
 }
+
+- (void)keyDown:(NSEvent *)event {
+  switch ([event keyCode]) {
+  // (Tino) TODO: standardize this and make it platform agnostic
+  case 51:
+    GapBuffer_delete_char(&state->text);
+    break;
+  default:
+    NSString *chars = [event charactersIgnoringModifiers];
+    if ([chars length] == 0)
+      return;
+
+    // TODO this doesn't handle utf-8
+    char c = [chars characterAtIndex:0];
+    GapBuffer_put_char(&state->text, c);
+  }
+}
 @end
 
 // MARK ParsecWindow impls
@@ -377,6 +399,7 @@ ParsecWindowArgs ParsecWindowArgs_default() {
 @implementation ParsecWindow
 - (void)windowWillClose:(NSNotification *)notification {
   Renderer_destroy(&state->renderer);
+  GapBuffer_destroy(&state->text);
 
   free(state);
   state = NULL;
@@ -425,6 +448,7 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
   WindowState *state = calloc(1, sizeof(WindowState));
   state->mouse.pos = (Vec2){-10, -10};
   Renderer_init(&state->renderer, device);
+  GapBuffer_init(&state->text);
 
   [win setState:state];
   [view setState:state];
@@ -460,12 +484,12 @@ void ParsecWindow_open(ParsecWindowArgs args, id<MTLDevice> device) {
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
-  TextSystem_destroy();
+  FontSystem_destroy();
 }
 @end
 
 int main() {
-  TextSystem_init();
+  FontSystem_init();
   UI_init();
 
   NSApplication *app = [NSApplication sharedApplication];

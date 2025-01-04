@@ -74,24 +74,47 @@ void BumpArena_free(void *_self, void *ptr);
 
 // MARK TextSystem
 
+#define GAP_SIZE 20
+
+typedef struct GapBuffer {
+  char *cursor;
+  char *text;
+  char *text_end;
+  char *gap_start;
+  char *gap_end;
+} GapBuffer;
+
+void GapBuffer_init(GapBuffer *self);
+
+void GapBuffer_destroy(GapBuffer *self);
+
+size_t GapBuffer_full_length(GapBuffer *self);
+
+void GapBuffer_put_char(GapBuffer *self, char c);
+
+void GapBuffer_delete_char(GapBuffer *self);
+
+// MARK FontSystem
+
 #define DEFAULT_FONT_SIZE 14
 
 extern FONScontext *f_ctx;
 
-void TextSystem_init();
+void FontSystem_init();
 
-void TextSystem_destroy();
+void FontSystem_destroy();
 
-void TextSystem_layout(const char* text, size_t len, Vec2 origin, 
+void FontSystem_layout(const char* text, size_t len, Vec2 origin, 
                        Clay_TextElementConfig *config, Sprite *sprites, 
                        size_t *num_sprites);
 
-bool TextSystem_is_dirty();
+bool FontSystem_is_dirty();
 
 // MARK UI
 
 typedef struct UIContext {
   Arena *arena;
+  GapBuffer *text;
 } UIContext;
 
 void UI_init();
