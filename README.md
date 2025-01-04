@@ -6,7 +6,8 @@ A text editor written in C. Currently supporting macOS.
 
 ## Building
 
-Parsec relies on [Font Stash](https://github.com/memononen/fontstash) for caching glyphs in a texture atlas and 
-[Clay](https://github.com/nicbarker/clay) for laying out UI elements.
+A single command to `make` is all that is needed to full compile Parsec.
 
-The `Makefile` is already configured to download and extract the necessary files from Font Stah and Clay.
+Parsec relies on [Font Stash](https://github.com/memononen/fontstash) for caching glyphs in a texture atlas and 
+[Clay](https://github.com/nicbarker/clay) for laying out UI elements. The `Makefile` is already configured to extract
+the necessary files from both repos.
