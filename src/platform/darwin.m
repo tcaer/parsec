@@ -10,7 +10,7 @@
 #define NS_NEW(X) [[X alloc] init]
 
 static const char SHADERS[] = {
-#embed "../build/shaders/shaders.metallib"
+#embed "../../build/shaders/shaders.metallib"
 };
 
 // MARK Renderer decls
@@ -38,7 +38,7 @@ void TextSystem_update_atlas(id<MTLTexture> atlas) {
     return;
 
   int width, height;
-  const unsigned char *data = fonsGetTextureData(f_ctx, &width, &height);
+  const unsigned char *data = FontSystem_get_texture_data(&width, &height);
   MTLRegion region = {{0, 0, 0}, {width, height, 1}};
   [atlas replaceRegion:region mipmapLevel:0 withBytes:data bytesPerRow:width];
 }
@@ -69,7 +69,7 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
 void Renderer_init(Renderer *self, id<MTLDevice> device) {
   @autoreleasepool {
     int width, height;
-    fonsGetTextureData(f_ctx, &width, &height);
+    FontSystem_get_texture_data(&width, &height);
     MTLTextureDescriptor *desc = NS_NEW(MTLTextureDescriptor);
     [desc setWidth:width];
     [desc setHeight:height];
@@ -307,13 +307,13 @@ id<MTLRenderPipelineState> mk_pipeline_state(id<MTLDevice> device,
                &state->mouse);
 
   char memory[MEGABYTE * 2];
-  Arena *arena = BumpArena_create(memory, sizeof(memory));
+  Allocator *allocator = Allocator_new(Arena, memory, sizeof(memory));
 
-  UIContext ctx = {arena, &state->editor};
+  UIContext ctx = {allocator, &state->editor};
   Clay_RenderCommandArray commands = EditorView_render(&ctx);
   Renderer_paint(&state->renderer, view, commands);
 
-  Arena_release(arena);
+  Allocator_release(allocator);
 }
 
 - (BOOL)acceptsFirstResponder {

@@ -49,41 +49,47 @@ typedef struct Mouse {
   bool pressed;
 } Mouse;
 
-// MARK Arena decls
+// MARK UI decls
+typedef struct StyledTextSpan {
+  Color backgroundColor;
+  Color textColor;
+} StyledTextSpan;
 
-typedef struct Arena {
+// MARK Allocator decls
+
+typedef struct Allocator {
   void *arena;
 
-  void (*release)(struct Arena *arena);
+  void (*release)(struct Allocator *arena);
   void* (*alloc)(void *self, size_t size);
   void (*free)(void *self, void *ptr);
-} Arena;
+} Allocator;
 
-#define Arena_release(A) A->release(A)
+#define Allocator_new(A, M, C) A##_create(M, C)
 
-#define Arena_alloc(A, T, N) A->alloc(A->arena, sizeof(T) * N)
+#define Allocator_release(A) A->release(A)
 
-#define Arena_free(A, P) A->free(A->arena, P)
+#define Allocator_alloc(A, T, N) A->alloc(A->arena, sizeof(T) * N)
+
+#define Allocator_free(A, P) A->free(A->arena, P)
 
 // An arena where all memory is expected to share the same lifetime. This 
 // arena simply keeps track of the current offset to allocate the next block memory 
-typedef struct BumpArena {
+typedef struct Arena {
   size_t capacity;
   size_t offset;
   char *memory;
 } BumpArena;
 
-Arena *BumpArena_create(char *memory, size_t capacity);
+Allocator *Arena_create(char *memory, size_t capacity);
 
-void BumpArena_release(Arena *arena);
+void Arena_release(Allocator *arena);
 
-void *BumpArena_alloc(void *_self, size_t size);
+void *Arena_alloc(void *_self, size_t size);
 
-void BumpArena_free(void *_self, void *ptr);
+void Arena_free(void *_self, void *ptr);
 
 // MARK GapBuffer decls
-
-#define GAP_SIZE 20
 
 typedef struct GapBuffer {
   char *buffer;
@@ -96,13 +102,13 @@ void GapBuffer_init(GapBuffer *self);
 
 void GapBuffer_destroy(GapBuffer *self);
 
+// MARK TextEditor decls
+
 typedef struct Selection {
   // anchor is the start of the selection, head is where the selection is extended to.
   // head can be extended to be before or after the anchor
   size_t anchor, head;
 } Selection;
-
-// MARK TextEditor decls
 
 typedef struct TextEditor {
   GapBuffer buffer;
@@ -114,11 +120,50 @@ void TextEditor_init(TextEditor *self);
 // TODO doesn't handle utf-8 or modifiers
 void TextEditor_handle_key(TextEditor *self, char c);
 
+// MARK TextEditor iter decls
+
+// Iterates over each line in a text editor
+typedef struct TextEditorLineIterItem {
+  char *line;
+  size_t len;
+  size_t idx;
+  float cursor_offset;
+} TextEditorLineIterItem;
+
+typedef struct TextEditorLineIter {
+  char *curr;
+  TextEditorLineIterItem item;
+} TextEditorLineIter;
+
+void TextEditorLineIter_init(TextEditorLineIter *self, TextEditor *editor);
+
+TextEditorLineIterItem *TextEditorLineIter_next(TextEditorLineIter *self,
+                                                TextEditor *editor);
+
+// Iterates over a line to generate blocks groups of styles for spans of chars
+// in the line
+typedef struct TextEditorSpanIterItem {
+  char *span;
+  size_t len;
+  StyledTextSpan styles;
+  size_t idx;
+} TextEditorSpanIterItem;
+
+typedef struct TextEditorSpanIter {
+  char *line;
+  char *curr;
+  size_t len;
+  TextEditorSpanIterItem item;
+} TextEditorSpanIter;
+
+void TextEditorSpanIter_init(TextEditorSpanIter *self, char *line, size_t len);
+
+TextEditorSpanIterItem *TextEditorSpanIter_next(TextEditorSpanIter *self,
+                                                TextEditor *editor);
+
 // MARK FontSystem
 
 #define DEFAULT_FONT_SIZE 14
-
-extern FONScontext *f_ctx;
 
 void FontSystem_init();
 
@@ -128,12 +173,17 @@ void FontSystem_layout(const char* text, size_t len, Vec2 origin,
                        Clay_TextElementConfig *config, Sprite *sprites, 
                        size_t *num_sprites);
 
+Clay_Dimensions FontSystem_measure_text(Clay_String *text,
+                                        Clay_TextElementConfig *config);
+
 bool FontSystem_is_dirty();
+
+const unsigned char* FontSystem_get_texture_data(int* width, int* height);
 
 // MARK UI
 
 typedef struct UIContext {
-  Arena *arena;
+  Allocator *arena;
   TextEditor *editor;
 } UIContext;
 

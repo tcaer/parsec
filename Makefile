@@ -7,7 +7,7 @@ CFLAGS += -Wno-gnu-zero-variadic-macro-arguments -Wno-unused-parameter
 
 LFLAGS := -framework CoreFoundation -framework Cocoa -framework Metal -framework MetalKit -framework QuartzCore
 
-SRCS := src/parsec.c src/darwin.m
+SRCS := $(shell find src -type f \( -name "*.c" -o -name "*.m" \))
 OBJS := $(SRCS:%=$(BIN)/%.o)
 
 SHADERS_SRCS := shaders/shaders.metal
